@@ -1,0 +1,141 @@
+import java.io.*;
+import java.sql.*;
+import java.util.*;
+import java.util.regex.*;
+
+public class crud1 {
+    public static void main(String[] args) {
+        String jdbcUrl = "jdbc:postgresql://127.0.0.1:5432/kavya";
+        String username = "postgres";
+        String password = "kavya";
+
+        Scanner scanner = new Scanner(System.in);
+
+        while (true) {
+            System.out.println("\n=== PostgreSQL Table Manager ===");
+            System.out.println("1. Create Tables");
+            System.out.println("2. Insert Data");
+            System.out.println("3. Drop Tables");
+            System.out.println("4. Exit");
+            System.out.print("Enter your choice: ");
+            int choice = scanner.nextInt();
+            scanner.nextLine(); // clear newline
+
+            if (choice == 4) {
+                System.out.println("Exiting...");
+                break;
+            }
+
+            String createFile = "createfiles.txt";
+            String insertFile = "insertfiles.txt";
+
+            try {
+                Class.forName("org.postgresql.Driver");
+                try (
+                    Connection conn = DriverManager.getConnection(jdbcUrl, username, password);
+                    Statement stmt = conn.createStatement()
+                ) {
+                    switch (choice) {
+                        case 1:
+                            System.out.println("\nCreating tables from: " + createFile);
+                            processSqlFile(createFile, stmt, true);
+                            break;
+                        case 2:
+                            System.out.println("\nInserting data from: " + insertFile);
+                            processSqlFile(insertFile, stmt, false);
+                            break;
+                        case 3:
+                            List<String> tablesToDrop = extractTableNames(createFile);
+                            for (String table : tablesToDrop) {
+                                String dropSql = "DROP TABLE IF EXISTS " + table + " CASCADE";
+                                try {
+                                    stmt.executeUpdate(dropSql);
+                                    System.out.println(" Dropped table: " + table);
+                                } catch (SQLException e) {
+                                    System.out.println("Error dropping table " + table + ": " + e.getMessage());
+                                }
+                            }
+                            break;
+                        default:
+                            System.out.println("❗ Invalid choice.");
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        scanner.close();
+    }
+
+    private static void processSqlFile(String fileName, Statement stmt, boolean isCreate) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(fileName))) {
+            StringBuilder sqlBuilder = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sqlBuilder.append(line).append("\n");
+            }
+
+            String[] sqlStatements = sqlBuilder.toString().split(";");
+
+            for (String sql : sqlStatements) {
+                sql = sql.trim();
+                if (!sql.isEmpty()) {
+                    try {
+                        stmt.execute(sql);
+                        if (isCreate && sql.toUpperCase().startsWith("CREATE TABLE")) {
+                            System.out.println("Created table: " + getTableName(sql));
+                        } else if (!isCreate && sql.toUpperCase().startsWith("INSERT INTO")) {
+                            System.out.println(" Inserted into: " + getTableName(sql));
+                        }
+                    } catch (SQLException e) {
+                        if ("42P07".equals(e.getSQLState()) && isCreate) {
+                            System.out.println(" Table already exists. Skipping: " + getTableName(sql));
+                        } else {
+                            System.out.println("SQL Error: " + sql);
+                            throw e;
+                        }
+                    }
+                }
+            }
+
+        } catch (IOException | SQLException e) {
+            System.out.println("❗ Error in file " + fileName + ": " + e.getMessage());
+        }
+    }
+
+    private static String getTableName(String sql) {
+        Pattern pattern = Pattern.compile(
+            "\\b(?:CREATE\\s+TABLE|INSERT\\s+INTO|DROP\\s+TABLE)\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(\\w+)",
+            Pattern.CASE_INSENSITIVE
+        );
+        Matcher matcher = pattern.matcher(sql);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "[unknown]";
+    }
+    private static List<String> extractTableNames(String fileName) {
+        List<String> tables = new ArrayList<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(fileName))) {
+            String line;
+            StringBuilder sqlBuilder = new StringBuilder();
+            while ((line = reader.readLine()) != null) {
+                sqlBuilder.append(line).append("\n");
+            }
+            String[] statements = sqlBuilder.toString().split(";");
+            for (String sql : statements) {
+                sql = sql.trim();
+                if (sql.toUpperCase().startsWith("CREATE TABLE")) {
+                    String table = getTableName(sql);
+                    if (!table.equals("[unknown]")) {
+                        tables.add(table);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("❗ Error reading for table names: " + e.getMessage());
+        }
+        return tables;
+    }
+}
